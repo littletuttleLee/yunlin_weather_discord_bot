@@ -1,4 +1,5 @@
 import discord
+import os
 from discord.ext import tasks, commands
 from dotenv import load_dotenv
 from selenium import webdriver

@@ -28,8 +28,7 @@ def home():
     return "Bot is running!"
 
 def run_web_server():
-    # Render 等平台會自動分配 PORT，若無則預設 8080
-    port = int(os.environ.get("PORT", 8080))
+    port = 10000
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():

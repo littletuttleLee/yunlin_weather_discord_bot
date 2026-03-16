@@ -1,7 +1,10 @@
-import discord
 import os
-from discord.ext import tasks, commands
+import io
+import discord
 from dotenv import load_dotenv
+from flask import Flask
+from threading import Thread
+from discord.ext import tasks, commands
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -9,7 +12,6 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
 import requests
-import io
 
 # --- 載入環境變數 ---
 load_dotenv()
@@ -19,7 +21,23 @@ CHANNEL_ID = int(os.getenv('DISCORD_CHANNEL_ID'))
 SEND_TIME = "08:30"
 COMMAND_PREFIX = "!"
 
-# --- 核心爬蟲函數 ---
+# --- 讓機器人保持在線的小網頁 ---
+app = Flask('')
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web_server():
+    # Render 等平台會自動分配 PORT，若無則預設 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web_server)
+    t.daemon = True # 確保主程式結束時 Thread 也跟著結束
+    t.start()
+
+# --- 核心爬蟲函數 (保持不變) ---
 def get_yunlin_weather_image():
     url = "https://www.cwa.gov.tw/V8/C/S/Ecard/index.html"
     target_alt = "-雲林縣天氣(每日18~19時更新)- 不管天晴天雨，我們都值得擁有好心情！中央氣象署田中氣象站 關心您！"
@@ -29,12 +47,12 @@ def get_yunlin_weather_image():
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     
+    # 這裡提醒：在 Linux 伺服器上部署時，通常需要指定 binary_location
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
         driver.get(url)
         driver.implicitly_wait(10) 
-        
         img_elements = driver.find_elements(By.CSS_SELECTOR, "#CardList img")
         
         img_url = None
@@ -49,12 +67,22 @@ def get_yunlin_weather_image():
             if response.status_code == 200:
                 return io.BytesIO(response.content)
         return None
-            
     except Exception as e:
         print(f"爬取錯誤: {e}")
         return None
     finally:
         driver.quit()
+
+# --- 封裝發送邏輯 ---
+async def send_weather_report(channel, type_name):
+    today_str = datetime.now().strftime("%Y年%m月%d日")
+    async with channel.typing():
+        img_data = get_yunlin_weather_image()
+        if img_data:
+            file = discord.File(img_data, filename="yunlin_weather.jpg")
+            await channel.send(content=f"📢 雲林縣天氣小叮嚀 ({type_name})\n📅 日期：{today_str}", file=file)
+        else:
+            await channel.send(content=f"❌ 抱歉，目前無法取得天氣圖片。")
 
 # --- Discord Bot 類別 ---
 class WeatherBot(commands.Bot):
@@ -64,23 +92,16 @@ class WeatherBot(commands.Bot):
         super().__init__(command_prefix=COMMAND_PREFIX, intents=intents)
 
     async def setup_hook(self):
-        # 啟動定時任務
         self.daily_task.start()
-        print("✅ Hook 已啟動，定時任務開始運行")
 
     async def on_ready(self):
         print(f'✅ 機器人已上線：{self.user}')
-        print(f'⏰ 定時廣播時間：{SEND_TIME}')
-        print(f'💬 即時指令前綴：{COMMAND_PREFIX}')
 
-    # --- 把指令直接寫在類別裡 ---
     @commands.command(name="weather")
     async def weather(self, ctx):
-        """手動呼叫：立刻執行爬蟲並傳送圖片"""
         print(f"🔹 收到來自 {ctx.author} 的即時請求")
         await send_weather_report(ctx.channel, "即時請求")
 
-    # 定時任務
     @tasks.loop(minutes=1)
     async def daily_task(self):
         now = datetime.now().strftime("%H:%M")
@@ -89,24 +110,8 @@ class WeatherBot(commands.Bot):
             if channel:
                 await send_weather_report(channel, "定時廣播")
 
-# --- 封裝發送邏輯 ---
-async def send_weather_report(channel, type_name):
-    today_str = datetime.now().strftime("%Y年%m月%d日")
-    async with channel.typing(): # 顯示「機器人正在打字...」讓使用者知道有在動
-        img_data = get_yunlin_weather_image()
-        if img_data:
-            file = discord.File(img_data, filename="yunlin_weather.jpg")
-            await channel.send(content=f"📢 **雲林縣天氣小叮嚀 ({type_name})**\n📅 日期：**{today_str}**", file=file)
-        else:
-            await channel.send(content=f"❌ 抱歉，目前無法取得天氣圖片。")
-
-# --- 實例化與指令設定 ---
-bot = WeatherBot()
-
-@bot.command(name="weather")
-async def weather(ctx):
-    """手動呼叫：立刻執行爬蟲並傳送圖片"""
-    print(f"收到來自 {ctx.author} 的即時請求")
-    await send_weather_report(ctx.channel, "即時請求")
-
-bot.run(TOKEN)
+# --- 啟動 ---
+if __name__ == "__main__":
+    keep_alive() # 啟動 Web Server
+    bot = WeatherBot()
+    bot.run(TOKEN)

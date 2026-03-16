@@ -20,7 +20,6 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = int(os.getenv('DISCORD_CHANNEL_ID'))
 SEND_TIME = "08:30"
 COMMAND_PREFIX = "!"
-PROXY_URL = "http://74.220.48.0:8000"
 
 # --- 讓機器人保持在線的小網頁 ---
 app = Flask('')
@@ -89,11 +88,7 @@ class WeatherBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True  
-        super().__init__(
-            command_prefix=COMMAND_PREFIX, 
-            intents=intents,
-            proxy=PROXY_URL  # 加入這一行
-        )
+        super().__init__(command_prefix=COMMAND_PREFIX, intents=intents)
 
     async def setup_hook(self):
         self.daily_task.start()
